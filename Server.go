@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/ishidawataru/sctp"
+	"github.com/toucan/toucan-calls/utils"
 )
 
 func main() {
@@ -36,23 +38,16 @@ func main() {
     fmt.Println("Client Connected: ",conn.RemoteAddr().String())
     go handleClient(conn)
   }
+
+  select {}
 }
 
 func handleClient(conn *sctp.SCTPConn) {
   defer conn.Close()
-  buffer := make([]byte,1024)
-  for  {
-    n, err := conn.Read(buffer)
-    if fmt.Sprintf("%v",err) != "EOF" && err != nil {
-      log.Printf("Failed in reading content from the client: %v",err)
-      return
-    }
-    message := string(buffer[:n])
-    fmt.Println("Recieved message: ",message)
-    _, err = conn.Write([]byte("Thank You!!"))
-    if err != nil {
-      log.Printf("Failed in sending the message to client: %v",err)
-      return
-    }
-  }
+  var wg sync.WaitGroup;
+  wg.Add(2)
+  duplex := utils.NewDuplex(conn)
+  go duplex.ReadLoop()
+  go duplex.WriteLoop([]byte("Thanks from server"))
+  wg.Wait()
 }

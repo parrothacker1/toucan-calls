@@ -1,6 +1,6 @@
 module github.com/toucan/toucan-calls
 
-go 1.23.1
+go 1.22.7
 
 require (
 	github.com/ishidawataru/sctp v0.0.0-20230406120618-7ff4192f6ff2 // indirect

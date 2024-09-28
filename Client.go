@@ -5,6 +5,7 @@ import (
   "log"
 
   "github.com/ishidawataru/sctp"
+  "github.com/toucan/toucan-calls/utils"
 )
 
 func main() {
@@ -18,14 +19,8 @@ func main() {
   }
   defer conn.Close()
   fmt.Println("Connected to the server")
-  _, err = conn.Write([]byte("Hello parrot"))
-  if err != nil {
-    log.Println("Failed in sending the message to server")
-  }
-  buffer := make([]byte,1024)
-  n, err := conn.Read(buffer)
-  if err != nil {
-    log.Println("Failed in reading the message from server")
-  }
-  fmt.Println("Messgae from server: ",string(buffer[:n]))
+  duplex := utils.NewDuplex(conn)
+  go duplex.ReadLoop()
+  duplex.WriteLoop([]byte("Nigga fuck u"))
+  select {}
 }
