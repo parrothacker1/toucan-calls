@@ -12,7 +12,7 @@ type ForwardEC struct {
   parityBits int
 }
 
-func (f *ForwardEC) NewEncoder(datashards,paritybits int) (*ForwardEC,error) {
+func NewEncoder(datashards,paritybits int) (*ForwardEC,error) {
   enc, err := reedsolomon.New(datashards,paritybits)
   if err != nil {
     return nil,err
