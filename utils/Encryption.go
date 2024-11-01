@@ -1,44 +1,26 @@
 package utils
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
+
+	"github.com/sirupsen/logrus"
 )
 
-type ECC struct {
-  PrivateKey *ecdsa.PrivateKey
-  PublicKey *ecdsa.PublicKey 
+func EncryptAES(data []byte,key []byte) ([]byte,error) {
+  block, err := aes.NewCipher(key); if err != nil { logrus.Errorf("Error in creating AES Cipher: %v\n",err);return nil,err }
+  gcm, err := cipher.NewGCM(block); if err != nil { logrus.Errorf("Error in creating GCM Object: %v\n",err);return nil,err }
+  nonce := make([]byte,gcm.NonceSize())
+  _,err = rand.Read(nonce); if err != nil { logrus.Errorf("Error in creating Nonce: %v\n",err);return nil,err }
+  return gcm.Seal(nonce,nonce,data,nil), nil
 }
 
-func GenerateECCKeys() (*ECC,error) {
-  privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader); if err != nil { return nil,err }
-  return &ECC {
-    PrivateKey: privKey, 
-    PublicKey: &privKey.PublicKey,
-  }, nil
-}
-
-func (e *ECC) EncryptECC(data []byte) ([]byte,error) {
-  return data,nil
-}
-
-func (e *ECC) DecryptECC(data []byte) ([]byte,error){
-  return data,nil
-}
-
-type AES struct {
-  key []byte
-}
-
-func NewAES(key []byte) (*AES,error){
-  return &AES { key: key },nil
-}
-
-func (a *AES) Encrypt(data []byte) ([]byte,error) {
-  return data,nil
-}
-
-func (a *AES) Decrypt(data []byte) ([]byte,error) {
+func DecryptAES(ciphertext []byte,key []byte) ([]byte,error) {
+  block, err := aes.NewCipher(key); if err != nil { logrus.Errorf("Error in creating AES Cipher: %v\n",err);return nil,err }
+  gcm, err := cipher.NewGCM(block); if err != nil { logrus.Errorf("Error in creating GCM Object: %v\n",err);return nil,err }
+  if len(ciphertext) < gcm.NonceSize() { logrus.Errorf("Ciphertext is too short");return nil,err }
+  nonce, ciphertext := ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():]
+  data, err := gcm.Open(nil, nonce, ciphertext, nil); if err != nil { logrus.Errorf("Error in opening ciphertext: %v\n",err);return nil,err}
   return data,nil
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	_ "reflect"
 
 	ecies "github.com/ecies/go/v2"
 	"github.com/ishidawataru/sctp"
@@ -27,7 +26,7 @@ func init() {
 }
 
 var ACKMessage []byte = []byte("ACK");
-var AESKey []byte = make([]byte,256);
+var AESEnc []byte = make([]byte,256);
 
 func main() {
   host := os.Getenv("HOST"); if host == "" { host = "127.0.0.1" }
@@ -55,10 +54,9 @@ func handleClient(con *sctp.SCTPConn,PrivateKey *ecies.PrivateKey) {
 
   // Here we read the encrypted AES Secret from the client and decrypt using ECC private key
   logrus.Debugf("Reading encrypted key from %s\n",con.RemoteAddr().String())
-  key_size,err := con.Read(AESKey); if err != nil { logrus.Errorf("Error in reading key from %s: %v\n",con.RemoteAddr().String(),err);return }
+  key_size,err := con.Read(AESEnc); if err != nil { logrus.Errorf("Error in reading key from %s: %v\n",con.RemoteAddr().String(),err);return }
   logrus.Debugf("Decrypting key from %s\n",con.RemoteAddr().String())
-  aesKey,err := ecies.Decrypt(PrivateKey,AESKey[:key_size]); if err != nil { logrus.Errorf("Error in decrypting AES key from %s: %v\n",con.RemoteAddr().String(),err);return }
-  _,err = utils.NewAES(aesKey); if err != nil { logrus.Errorf("Error in creating a AES object with the key from %s: %v\n",con.RemoteAddr().String(),err);return }
+  aesKey,err := ecies.Decrypt(PrivateKey,AESEnc[:key_size]); if err != nil { logrus.Errorf("Error in decrypting AES key from %s: %v\n",con.RemoteAddr().String(),err);return }
 
   // Sending ACK to the client to indicate that we managed to decrypt the key and managed to create AES object
   logrus.Debugf("Sending ACK to %s\n",con.RemoteAddr().String())
@@ -67,4 +65,10 @@ func handleClient(con *sctp.SCTPConn,PrivateKey *ecies.PrivateKey) {
   // Starting a full duplex communication and adding FEC to each message here onwards
   _ = utils.NewDuplex(con)
   _, err = utils.NewEncoder(4,2)
+  data := make([]byte,128)
+  dd_s,err := con.Read(data)
+  dd,err := utils.DecryptAES(data[:dd_s],aesKey);
+  fmt.Println(string(dd))
+
+  // FEC -> AES -> Broadcasting
 }
