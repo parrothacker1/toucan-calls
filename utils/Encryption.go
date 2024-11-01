@@ -12,14 +12,15 @@ type ECC struct {
 }
 
 func GenerateECCKeys() (*ECC,error) {
-  privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-  if err != nil {
-    return nil,err
-  }
+  privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader); if err != nil { return nil,err }
   return &ECC {
     PrivateKey: privKey, 
     PublicKey: &privKey.PublicKey,
   }, nil
+}
+
+func (e *ECC) EncryptECC(data []byte) ([]byte,error) {
+  return data,nil
 }
 
 func (e *ECC) DecryptECC(data []byte) ([]byte,error){

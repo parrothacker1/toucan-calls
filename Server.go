@@ -2,99 +2,69 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
-	"sync"
+	_ "reflect"
 
+	ecies "github.com/ecies/go/v2"
 	"github.com/ishidawataru/sctp"
+	"github.com/sirupsen/logrus"
 	"github.com/toucan/toucan-calls/utils"
 )
 
-func main() {
-  host := os.Getenv("HOST")
-  port := os.Getenv("PORT")
-  if (host == "") {
-    host = "127.0.0.1"
+func init() {
+  switch os.Getenv("LOG_LEVEL") {
+  case "DEBUG":
+    logrus.SetLevel(logrus.DebugLevel)
+  case "INFO":
+    logrus.SetLevel(logrus.InfoLevel)
+  case "ERROR":
+    logrus.SetLevel(logrus.ErrorLevel)
+  case "WARN":
+    logrus.SetLevel(logrus.WarnLevel)
+  default:
+    logrus.SetLevel(logrus.InfoLevel)
   }
-  if (port == "") {
-    port = "3000"
-  }
-  log.Println("Generating the ECC keys")
-  ecc_obj,err := utils.GenerateECCKeys()
-  if err != nil {
-    log.Fatalf("Failed in generating ECC keys")
-  }
-  addr, err := sctp.ResolveSCTPAddr("sctp",fmt.Sprintf("%s:%s",host,port))
-  if err != nil {
-    log.Fatalf("Failed to resolve address: %v\n",err)
-  }
-  listener, err := sctp.ListenSCTP("sctp",addr)
-  if err != nil {
-    log.Fatalf("Failed to start server: %v\n",err)
-  }
-  defer listener.Close()
-  fmt.Println("Started Server at ",port)
-
-  for {
-    conn, err := listener.AcceptSCTP()
-    if err != nil {
-      log.Printf("Failed to create a connection: %v\n",err)
-    }
-    fmt.Println("Client Connected: ",conn.RemoteAddr().String())
-    go handleClient(conn,ecc_obj)
-  }
-
-  select {}
 }
 
-func handleClient(conn *sctp.SCTPConn,ecc *utils.ECC) {
-  defer conn.Close()
-  var wg sync.WaitGroup
-  wg.Add(2)
-  publicBytes := append(ecc.PublicKey.X.Bytes(),ecc.PublicKey.Y.Bytes()...)
-  _,err := conn.Write(publicBytes)
-  if err != nil {
-    log.Println("Error in sending ECC key")
-    return
-  }
-  fmt.Println("ECC key sent to client")
-  encryptKey := make([]byte,256)
-  _, err = conn.Read(encryptKey)
-  if err != nil {
-    log.Println("Error in reading key")
-    return
-  }
-  aesKey, err := ecc.DecryptECC(encryptKey)
-  if err != nil {
-    log.Println("Error in decrypting the AES Key.")
-    return
-  }
-  ackMessage := []byte("ACK")
-  _, err = conn.Write(ackMessage)
-  if err != nil {
-    log.Println("Error in sending ack to client")
-    return
-  }
-  fmt.Println("Sent ACK to client")
+var ACKMessage []byte = []byte("ACK");
+var AESKey []byte = make([]byte,256);
 
-  _,err = utils.NewAES(aesKey)
-  if err != nil {
-    log.Println("Unable to generate new AES object")
-    return
+func main() {
+  host := os.Getenv("HOST"); if host == "" { host = "127.0.0.1" }
+  port := os.Getenv("PORT"); if port == "" { port = "3000" }
+  logrus.Debugln("Generating ECC keys")
+  PrivateKey, err := ecies.GenerateKey();if err != nil { logrus.Fatalf("Failed to generate ECC keys: %v\n",err); }
+  logrus.Debugf("Resolving address: %s:%s\n",host,port)
+  addr, err := sctp.ResolveSCTPAddr("sctp", fmt.Sprintf("%s:%s",host,port)); if err != nil { logrus.Fatalf("Failed to resolve address: %v\n",err); }
+  logrus.Debugln("Starting Server")
+  listener, err := sctp.ListenSCTP("sctp",addr); if err != nil { logrus.Fatalf("Failed to start the server: %v\n",err) }
+  defer listener.Close()
+  logrus.Infof("Started server at %s:%s",host,port)
+  for {
+    conn, err := listener.AcceptSCTP(); if err != nil { logrus.Errorf("Failed to create connection: %v\n",err) }
+    logrus.Debugf("Connection created with: %s\n",conn.RemoteAddr().String())
+    go handleClient(conn,PrivateKey)
   }
-  duplex := utils.NewDuplex(conn)
-  go duplex.ReadLoop()
-  fec, err := utils.NewEncoder(10, 3)
-	if err != nil {
-    log.Println("Error in creating Encoder")
-    return
-	}
-	data, err := fec.EncodeData([]byte("Thanks from server"))
-	if err != nil {
-		log.Println("Error in encoding the data")
-	}
-	fmt.Printf("%v\n", string(data))
-	go duplex.WriteLoop(data)
+}
 
-	wg.Wait()
+func handleClient(con *sctp.SCTPConn,PrivateKey *ecies.PrivateKey) {
+  defer con.Close()
+  // Sending Public Key as Hex 
+  logrus.Debugf("Sending public key to %s\n",con.RemoteAddr().String())
+  _,err := con.Write([]byte(PrivateKey.PublicKey.Hex(true))); if err != nil { logrus.Errorf("Error in sending the public key to %s: %v\n",con.RemoteAddr().String(),err);return }
+
+  // Here we read the encrypted AES Secret from the client and decrypt using ECC private key
+  logrus.Debugf("Reading encrypted key from %s\n",con.RemoteAddr().String())
+  key_size,err := con.Read(AESKey); if err != nil { logrus.Errorf("Error in reading key from %s: %v\n",con.RemoteAddr().String(),err);return }
+  logrus.Debugf("Decrypting key from %s\n",con.RemoteAddr().String())
+  aesKey,err := ecies.Decrypt(PrivateKey,AESKey[:key_size]); if err != nil { logrus.Errorf("Error in decrypting AES key from %s: %v\n",con.RemoteAddr().String(),err);return }
+  _,err = utils.NewAES(aesKey); if err != nil { logrus.Errorf("Error in creating a AES object with the key from %s: %v\n",con.RemoteAddr().String(),err);return }
+
+  // Sending ACK to the client to indicate that we managed to decrypt the key and managed to create AES object
+  logrus.Debugf("Sending ACK to %s\n",con.RemoteAddr().String())
+  _,err = con.Write(ACKMessage); if err != nil { logrus.Errorf("Error in sending ACK to %s: %v\n",con.RemoteAddr().String(),err);return }
+  
+  // Starting a full duplex communication and adding FEC to each message here onwards
+  _ = utils.NewDuplex(con)
+  _, err = utils.NewEncoder(4,2)
 }
