@@ -39,6 +39,9 @@ func main() {
   _,err := rand.Read(values.AESKey);if err != nil { logrus.Fatalf("Error in generating AES Key: %v\n",err) }
   logrus.Debugf("Resolving address %s:%s\n",host,port)
   addr, err := sctp.ResolveSCTPAddr("sctp",fmt.Sprintf("%s:%s",host,port)); if err != nil { logrus.Fatalf("Failed to resolve address: %v\n",err) }
+  if values.EncoderError != nil {
+    logrus.Fatalf("Error in generating FEC encoder: %v\n",values.EncoderError)
+  }
   logrus.Debugf("Connecting to server %s:%s\n",host,port)
   conn, err := sctp.DialSCTP("sctp",nil,addr); if err != nil { logrus.Fatalf("Failed to connect to server: %v\n",err) }
   logrus.Infof("Connected to server at %s",conn.RemoteAddr().String())
@@ -70,11 +73,12 @@ func main() {
       room_id = string(room_id[:len(room_id)-1])
       _,err = uuid.Parse(room_id); if err != nil { logrus.Errorf("The given UUID is invalid: %v\n",err) } else { break }
     }
-  }
+  } 
   room_id_enc,err := encrypt.EncryptAES([]byte(room_id),values.AESKey);if err != nil { logrus.Fatalf("The UUID cannot be encrypted: %v\n",err) }
   _,err = conn.Write(room_id_enc);if err != nil { logrus.Fatalf("Error in sending room ID to server %s: %v\n",conn.RemoteAddr().String(),err) }
-  time.Sleep(20*time.Second)
-  text,err := encrypt.EncryptAES([]byte("testing_is_in_veins"),values.AESKey)
+  time.Sleep(10*time.Second)
+  data,err := values.Encoder.EncodeData([]byte("testing"))
+  text,err := encrypt.EncryptAES(data,values.AESKey)
   _,err = conn.Write(text)
   msg_buf := make([]byte,1024)
   n,err = conn.Read(msg_buf)

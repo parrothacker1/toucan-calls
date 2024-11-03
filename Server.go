@@ -35,6 +35,9 @@ func main() {
   PrivateKey, err := ecies.GenerateKey();if err != nil { logrus.Fatalf("Failed to generate ECC keys: %v\n",err); }
   logrus.Debugf("Resolving address: %s:%s\n",host,port)
   addr, err := sctp.ResolveSCTPAddr("sctp", fmt.Sprintf("%s:%s",host,port)); if err != nil { logrus.Fatalf("Failed to resolve address: %v\n",err); }
+  if values.EncoderError != nil {
+    logrus.Fatalf("Error in generating FEC Encoder: %v\n",values.EncoderError)
+  }
   logrus.Debugln("Starting Server")
   listener, err := sctp.ListenSCTP("sctp",addr); if err != nil { logrus.Fatalf("Failed to start the server: %v\n",err) }
   defer listener.Close()
@@ -70,7 +73,7 @@ func handleClient(con *sctp.SCTPConn,PrivateKey *ecies.PrivateKey) {
   logrus.Debugf("Getting Room ID from client %s\n",con.RemoteAddr().String())
   room_id_dec := make([]byte,128)
   room_id_size,err := con.Read(room_id_dec); if err != nil { logrus.Errorf("Error in reading Room ID from %s: %v\n",con.RemoteAddr().String(),err) }
-  room_id,err := encrypt.DecryptAES(room_id_dec[:room_id_size],values.AESKey); if err != nil { logrus.Errorf("Error in decrypting Room IF from %s: %v\n",con.RemoteAddr().String(),err) }
+  room_id,err := encrypt.DecryptAES(room_id_dec[:room_id_size],values.AESKey); if err != nil { logrus.Errorf("Error in decrypting Room ID from %s: %v\n",con.RemoteAddr().String(),err) }
   room_uuid,err := uuid.Parse(string(room_id));if err != nil { logrus.Errorf("Error in parsing Room ID from %s: %v\n",con.RemoteAddr().String(),err) }
   values.Storage[con] = values.StorageValue { 
     RoomID : room_uuid,
@@ -80,26 +83,26 @@ func handleClient(con *sctp.SCTPConn,PrivateKey *ecies.PrivateKey) {
   for {
     // reading input from the client 
     msg_buf := make([]byte,1024)
-    if con.RemoteAddr() == nil {
-      break
-    }
+    if con.RemoteAddr() == nil { break }
     msg_size,err := con.Read(msg_buf); if err != nil { logrus.Errorf("Error in reading input from %s: %v\n",con.RemoteAddr().String(),err) }
     if msg_size > 3 {
-      msg,err := encrypt.DecryptAES(msg_buf[:msg_size],values.Storage[con].AESkey); if err != nil { logrus.Errorf("Error in decrypting the input from %s: %v\n",con.RemoteAddr().String(),err) }
+      msg_enc,err := encrypt.DecryptAES(msg_buf[:msg_size],values.Storage[con].AESkey); if err != nil { logrus.Errorf("Error in decrypting the input from %s: %v\n",con.RemoteAddr().String(),err) }
+      msg_dec,issues,err := values.Encoder.DecodeData(msg_enc); if err != nil { logrus.Errorf("Error in decoding incoming data from %s: %v\n",con.RemoteAddr().String(),err) }
+      fmt.Println(string(msg_dec))
+      if !issues { logrus.Warnf("There are errors in the incoming data from %s\n",con.RemoteAddr().String()) }
       for key,value := range values.Storage {
         if key != con && value.RoomID == values.Storage[con].RoomID {
-          msg_to_snd,err := encrypt.EncryptAES(msg,value.AESkey); if err != nil { logrus.Errorf("Error in encrypting message from %s for %s: %v\n",con.RemoteAddr().String(),key.RemoteAddr().String(),err) }
+          // broadcasting that message to everyone
           if _, exists := values.Storage[key]; exists {
-            _,err = key.Write(msg_to_snd); if err != nil { logrus.Errorf("Error in sending messgae from %s to %s: %v\n",con.RemoteAddr().String(),key.RemoteAddr().String(),err) }
+            msg_enc,err = values.Encoder.EncodeData(msg_dec); if err != nil { logrus.Errorf("Error in encoding data to be sent to %s: %v\n",key.RemoteAddr().String(),err) }
+            msg_to_snd,err := encrypt.EncryptAES(msg_enc,value.AESkey);if err != nil { logrus.Errorf("Error in encrypting data to be sent to %s: %v\n",key.RemoteAddr().String(),err) }
+            _,err = key.Write(msg_to_snd)
+            if err != nil { logrus.Errorf("Error in sending message from %s to %s: %v\n",con.RemoteAddr().String(),key.RemoteAddr().String(),err) }
           }
         }
       }
     } else {
-      if string(msg_buf[:msg_size]) == "EXT" {
-        break
-      }
+      if string(msg_buf[:msg_size]) == "EXT" { break }
     }
   }
-
-  // FEC -> AES -> Broadcasting
 }
