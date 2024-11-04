@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"fmt"
 	"os"
-	"time"
+	"os/signal"
+	"sync"
+	"syscall"
 
 	ecies "github.com/ecies/go/v2"
 	"github.com/google/uuid"
@@ -46,6 +48,18 @@ func main() {
   conn, err := sctp.DialSCTP("sctp",nil,addr); if err != nil { logrus.Fatalf("Failed to connect to server: %v\n",err) }
   logrus.Infof("Connected to server at %s",conn.RemoteAddr().String())
 
+  // handling Ctrl + C using signals to avoid closing connection before sending necessary messages
+  signals := make(chan os.Signal, 1)
+  signal.Notify(signals,os.Interrupt,syscall.SIGTERM)
+
+  go func() {
+    <-signals
+    logrus.Info("Ctrl+C detected.Stopping the client...")
+    conn.Write([]byte("EXT"))
+    conn.Close()
+    os.Exit(0)
+  }()
+
   // Recieving the ECC Public key and making ECC Object out of it
   pubKeyBuffer := make([]byte,128)
   n, err := conn.Read(pubKeyBuffer); if err != nil { logrus.Fatalf("Failed to read ECC public key from %s: %v\n",conn.RemoteAddr().String(),err) }
@@ -76,18 +90,32 @@ func main() {
   } 
   room_id_enc,err := encrypt.EncryptAES([]byte(room_id),values.AESKey);if err != nil { logrus.Fatalf("The UUID cannot be encrypted: %v\n",err) }
   _,err = conn.Write(room_id_enc);if err != nil { logrus.Fatalf("Error in sending room ID to server %s: %v\n",conn.RemoteAddr().String(),err) }
-  time.Sleep(10*time.Second)
-  data,err := values.Encoder.EncodeData([]byte("testing"))
-  text,err := encrypt.EncryptAES(data,values.AESKey)
-  _,err = conn.Write(text)
-  msg_buf := make([]byte,1024)
-  n,err = conn.Read(msg_buf)
-  msg,err := encrypt.DecryptAES(msg_buf[:n],values.AESKey);
-  fmt.Println(string(msg))
-  msg_buf = make([]byte,1024)
-  n,err = conn.Read(msg_buf)
-  msg,err = encrypt.DecryptAES(msg_buf[:n],values.AESKey);
-  fmt.Println(string(msg))
-  _,err = conn.Write([]byte("EXT"))
-  conn.Close()
+
+  var wg sync.WaitGroup;
+  wg.Add(2)
+  go ClientRead(conn)
+  go ClientWrite(conn,reader)
+  wg.Wait()
+}
+
+func ClientRead(con *sctp.SCTPConn) {
+  for {
+    buffer := make([]byte,1024)
+    n,err := con.Read(buffer); if err != nil {logrus.Errorf("Error in reading the message from %s: %v\n",con.RemoteAddr().String(),err);return }
+    msg_enc,err := encrypt.DecryptAES(buffer[:n],values.AESKey);if err != nil { logrus.Errorf("Error in decrypting the message from %s: %v\n",con.RemoteAddr().String(),err); return }
+    message,_,err := values.Encoder.DecodeData(msg_enc);if err != nil { logrus.Errorf("Error in decoding the message from %s: %v\n",con.RemoteAddr().String(),err); return }
+    //if !issues { logrus.Warnf("There are errors in the incoming data from %s.",con.RemoteAddr().String()) }
+    fmt.Printf("The message is %s\n",message)
+  }
+}
+
+func ClientWrite(con *sctp.SCTPConn,reader *bufio.Reader) {
+  for {
+    fmt.Print("Enter the message: ")
+    input,err := reader.ReadString('\n'); if err != nil { logrus.Errorf("Error in reading input message: %v\n",err);return }
+    input = input[:len(input)-1]
+    data,err := values.Encoder.EncodeData([]byte(input));if err != nil { logrus.Errorf("Error in adding FEC to message: %v\n",err);return }
+    to_be_snd,err := encrypt.EncryptAES(data,values.AESKey); if err != nil { logrus.Errorf("Error in encrypting the data to be sent to %s: %v\n",con.RemoteAddr().String(),err);return }
+    _,err = con.Write(to_be_snd);if err != nil { logrus.Errorf("Error in sending the data to %s: %v\n",con.RemoteAddr().String(),err);return }
+  }
 }

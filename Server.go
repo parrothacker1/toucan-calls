@@ -88,7 +88,6 @@ func handleClient(con *sctp.SCTPConn,PrivateKey *ecies.PrivateKey) {
     if msg_size > 3 {
       msg_enc,err := encrypt.DecryptAES(msg_buf[:msg_size],values.Storage[con].AESkey); if err != nil { logrus.Errorf("Error in decrypting the input from %s: %v\n",con.RemoteAddr().String(),err) }
       msg_dec,issues,err := values.Encoder.DecodeData(msg_enc); if err != nil { logrus.Errorf("Error in decoding incoming data from %s: %v\n",con.RemoteAddr().String(),err) }
-      fmt.Println(string(msg_dec))
       if !issues { logrus.Warnf("There are errors in the incoming data from %s\n",con.RemoteAddr().String()) }
       for key,value := range values.Storage {
         if key != con && value.RoomID == values.Storage[con].RoomID {

@@ -25,7 +25,6 @@ func NewEncoder(datashards,paritybits int) (*ForwardEC,error) {
 func (f *ForwardEC) EncodeData(data []byte) ([]byte,error) {
   shards, err := f.encoder.Split(data); if err != nil { return nil,err }
   err = f.encoder.Encode(shards); if err != nil { return nil,err }
-
   var buf bytes.Buffer
   outSize := len(data)
   err = f.encoder.Join(&buf,shards,outSize); if err != nil { return nil,err }
