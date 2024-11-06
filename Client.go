@@ -9,11 +9,13 @@ import (
 	"sync"
 	"syscall"
 
+  _ "time"
 	ecies "github.com/ecies/go/v2"
 	"github.com/google/uuid"
+	"github.com/gordonklaus/portaudio"
 	"github.com/ishidawataru/sctp"
 	"github.com/sirupsen/logrus"
-	_ "github.com/toucan/toucan-calls/utils"
+  _ "github.com/toucan/toucan-calls/utils"
 	"github.com/toucan/toucan-calls/utils/encrypt"
 	"github.com/toucan/toucan-calls/utils/values"
 )
@@ -33,12 +35,24 @@ func init() {
   }
 }
 
+const (
+	sampleRate     = 44100
+	framesPerBuffer = 2205
+	channelCount   = 1
+)
+
+// Buffer for storing audio segments
+var audioBuffer = make(chan []byte, 10)
+
 func main() {
   host := os.Getenv("HOST"); if host == "" { host = "127.0.0.1" }
   port := os.Getenv("PORT"); if port == "" { port = "3000" }
   logrus.Debug("Generating AES Key")
   values.AESKey = make([]byte, 32)
-  _,err := rand.Read(values.AESKey);if err != nil { logrus.Fatalf("Error in generating AES Key: %v\n",err) }
+  logrus.Debugf("Initializing PortAudio")
+  err := portaudio.Initialize();if err != nil { logrus.Fatalf("Error in initializing portaudio: %v\n",err) }
+  defer portaudio.Terminate()
+  _,err = rand.Read(values.AESKey);if err != nil { logrus.Fatalf("Error in generating AES Key: %v\n",err) }
   logrus.Debugf("Resolving address %s:%s\n",host,port)
   addr, err := sctp.ResolveSCTPAddr("sctp",fmt.Sprintf("%s:%s",host,port)); if err != nil { logrus.Fatalf("Failed to resolve address: %v\n",err) }
   if values.EncoderError != nil {
@@ -59,8 +73,7 @@ func main() {
     conn.Close()
     os.Exit(0)
   }()
-
-  // Recieving the ECC Public key and making ECC Object out of it
+ // Recieving the ECC Public key and making ECC Object out of it
   pubKeyBuffer := make([]byte,128)
   n, err := conn.Read(pubKeyBuffer); if err != nil { logrus.Fatalf("Failed to read ECC public key from %s: %v\n",conn.RemoteAddr().String(),err) }
   pubKeyHex := string(pubKeyBuffer[:n])
@@ -94,28 +107,52 @@ func main() {
   var wg sync.WaitGroup;
   wg.Add(2)
   go ClientRead(conn)
-  go ClientWrite(conn,reader)
+  go ClientWrite(conn)
   wg.Wait()
 }
 
+
 func ClientRead(con *sctp.SCTPConn) {
+  out := make([]int16,2205)
+  stream,err := portaudio.OpenDefaultStream(0,1,22050,len(out),out); if err != nil { logrus.Errorf("Error in opening audio stream for output: %v\n",err) }
+  defer stream.Close()
+  stream.Start()
+  defer stream.Stop()
   for {
-    buffer := make([]byte,1024)
+    buffer := make([]byte,1024*100)
     n,err := con.Read(buffer); if err != nil {logrus.Errorf("Error in reading the message from %s: %v\n",con.RemoteAddr().String(),err);return }
     msg_enc,err := encrypt.DecryptAES(buffer[:n],values.AESKey);if err != nil { logrus.Errorf("Error in decrypting the message from %s: %v\n",con.RemoteAddr().String(),err); return }
     message,_,err := values.Encoder.DecodeData(msg_enc);if err != nil { logrus.Errorf("Error in decoding the message from %s: %v\n",con.RemoteAddr().String(),err); return }
     //if !issues { logrus.Warnf("There are errors in the incoming data from %s.",con.RemoteAddr().String()) }
-    fmt.Printf("The message is %s\n",message)
+    count := len(message)/2;if count > len(out) { count = len(out) }
+    for i := 0; i < count; i++ {
+      out[i] = int16(message[i*2]) | int16(message[i*2+1]) << 8
+    }
+    if err = stream.Write(); err != nil { logrus.Errorf("Erron in writing stream into output: %v\n",err) }
   }
 }
 
-func ClientWrite(con *sctp.SCTPConn,reader *bufio.Reader) {
+
+func ClientWrite(con *sctp.SCTPConn) {
+  in := make([]int16,2205)
+  stream,err := portaudio.OpenDefaultStream(1,0,22050,len(in),in); if err != nil { logrus.Fatalf("Error in opening audio stream for input: %v\n",err) }
+  defer stream.Close()
+  stream.Start()
+  defer stream.Stop()
   for {
-    fmt.Print("Enter the message: ")
-    input,err := reader.ReadString('\n'); if err != nil { logrus.Errorf("Error in reading input message: %v\n",err);return }
-    input = input[:len(input)-1]
-    data,err := values.Encoder.EncodeData([]byte(input));if err != nil { logrus.Errorf("Error in adding FEC to message: %v\n",err);return }
+    if err := stream.Read(); err != nil { logrus.Errorf("Error in reading from the input stream: %v\n",err) }
+    input := int16ToBytes(in)
+    data,err := values.Encoder.EncodeData(input);if err != nil { logrus.Errorf("Error in adding FEC to message: %v\n",err);return }
     to_be_snd,err := encrypt.EncryptAES(data,values.AESKey); if err != nil { logrus.Errorf("Error in encrypting the data to be sent to %s: %v\n",con.RemoteAddr().String(),err);return }
     _,err = con.Write(to_be_snd);if err != nil { logrus.Errorf("Error in sending the data to %s: %v\n",con.RemoteAddr().String(),err);return }
   }
+}
+
+func int16ToBytes(data []int16) []byte {
+  byteBuf := make([]byte,len(data)*2)
+  for i,v := range data {
+    byteBuf[i*2] = byte(v)
+    byteBuf[i*2+1] = byte(v >> 8)
+  }
+  return byteBuf
 }

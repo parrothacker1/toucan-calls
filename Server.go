@@ -82,7 +82,7 @@ func handleClient(con *sctp.SCTPConn,PrivateKey *ecies.PrivateKey) {
 
   for {
     // reading input from the client 
-    msg_buf := make([]byte,1024)
+    msg_buf := make([]byte,1024*100)
     if con.RemoteAddr() == nil { break }
     msg_size,err := con.Read(msg_buf); if err != nil { logrus.Errorf("Error in reading input from %s: %v\n",con.RemoteAddr().String(),err) }
     if msg_size > 3 {
