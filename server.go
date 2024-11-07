@@ -35,8 +35,8 @@ func main() {
   PrivateKey, err := ecies.GenerateKey();if err != nil { logrus.Fatalf("Failed to generate ECC keys: %v\n",err); }
   logrus.Debugf("Resolving address: %s:%s\n",host,port)
   addr, err := sctp.ResolveSCTPAddr("sctp", fmt.Sprintf("%s:%s",host,port)); if err != nil { logrus.Fatalf("Failed to resolve address: %v\n",err); }
-  if values.EncoderError != nil {
-    logrus.Fatalf("Error in generating FEC Encoder: %v\n",values.EncoderError)
+  if values.FECEncoderError != nil {
+    logrus.Fatalf("Error in generating FEC Encoder: %v\n",values.FECEncoderError)
   }
   logrus.Debugln("Starting Server")
   listener, err := sctp.ListenSCTP("sctp",addr); if err != nil { logrus.Fatalf("Failed to start the server: %v\n",err) }
@@ -87,13 +87,13 @@ func handleClient(con *sctp.SCTPConn,PrivateKey *ecies.PrivateKey) {
     msg_size,err := con.Read(msg_buf); if err != nil { logrus.Errorf("Error in reading input from %s: %v\n",con.RemoteAddr().String(),err) }
     if msg_size > 3 {
       msg_enc,err := encrypt.DecryptAES(msg_buf[:msg_size],values.Storage[con].AESkey); if err != nil { logrus.Errorf("Error in decrypting the input from %s: %v\n",con.RemoteAddr().String(),err) }
-      msg_dec,issues,err := values.Encoder.DecodeData(msg_enc); if err != nil { logrus.Errorf("Error in decoding incoming data from %s: %v\n",con.RemoteAddr().String(),err) }
-      if !issues { logrus.Warnf("There are errors in the incoming data from %s\n",con.RemoteAddr().String()) }
+      msg_dec,_,err := values.FECEncoder.DecodeData(msg_enc); if err != nil { logrus.Errorf("Error in decoding incoming data from %s: %v\n",con.RemoteAddr().String(),err) }
+      //if !issues { logrus.Warnf("There are errors in the incoming data from %s\n",con.RemoteAddr().String()) }
       for key,value := range values.Storage {
         if key != con && value.RoomID == values.Storage[con].RoomID {
           // broadcasting that message to everyone
           if _, exists := values.Storage[key]; exists {
-            msg_enc,err = values.Encoder.EncodeData(msg_dec); if err != nil { logrus.Errorf("Error in encoding data to be sent to %s: %v\n",key.RemoteAddr().String(),err) }
+            msg_enc,err = values.FECEncoder.EncodeData(msg_dec); if err != nil { logrus.Errorf("Error in encoding data to be sent to %s: %v\n",key.RemoteAddr().String(),err) }
             msg_to_snd,err := encrypt.EncryptAES(msg_enc,value.AESkey);if err != nil { logrus.Errorf("Error in encrypting data to be sent to %s: %v\n",key.RemoteAddr().String(),err) }
             _,err = key.Write(msg_to_snd)
             if err != nil { logrus.Errorf("Error in sending message from %s to %s: %v\n",con.RemoteAddr().String(),key.RemoteAddr().String(),err) }
