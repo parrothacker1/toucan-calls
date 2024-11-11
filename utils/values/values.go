@@ -1,6 +1,9 @@
 package values
 
 import (
+	"sync"
+	"time"
+
 	ecies "github.com/ecies/go/v2"
 	"github.com/google/uuid"
 	"github.com/ishidawataru/sctp"
@@ -12,18 +15,34 @@ var ACKMessage []byte = []byte("ACK");
 var PublicKey *ecies.PublicKey;
 var AESKey []byte;
 
-type StorageValue struct {
-  RoomID uuid.UUID
+type Client struct {
+  Network *sctp.SCTPConn
   AESkey  []byte
-};
+}
+
+type AudioChunk struct {
+  BasePCM []int16
+  Overlay map[*Client][]int16
+  RefCounter int
+  Timestamp time.Time
+}
+
+type AudioBuffer struct {
+  Mu sync.Mutex
+  Buffer []*AudioChunk
+}
+
+type Room struct {
+  AudioBuf *AudioBuffer
+  Clients []*Client
+  RoomID uuid.UUID
+}
 
 const (
 	ClientRate = 48000
 	ClientframesPerBuffer = 480*6
 	ClientchannelCount   = 1
 )
-
-var Storage = make(map[*sctp.SCTPConn]StorageValue)
 
 var ClientAudioBuffer = make(chan []int16,30)
 

@@ -103,11 +103,18 @@ func main() {
   room_id_enc,err := encrypt.EncryptAES([]byte(room_id),values.AESKey);if err != nil { logrus.Fatalf("The UUID cannot be encrypted: %v\n",err) }
   _,err = conn.Write(room_id_enc);if err != nil { logrus.Fatalf("Error in sending room ID to server %s: %v\n",conn.RemoteAddr().String(),err) }
   var wg sync.WaitGroup;
-  wg.Add(3)
-  go ClientRead(conn)
-  go ClientWrite(conn)
-  go clientPlayBack()
+  wg.Add(1)
+  //go ClientRead(conn)
+  //go ClientWrite(conn)
+  //go clientPlayBack()
+  go test()
   wg.Wait()
+}
+
+func test() {
+  for {
+    logrus.Debug("testing")
+  }
 }
 
 func clientPlayBack() {
@@ -140,9 +147,6 @@ func ClientRead(con *sctp.SCTPConn) {
       count := values.ClientchannelCount * values.ClientframesPerBuffer * values.ClientRate / 1000
       audioChunk := make([]int16,count)
       values.OpusDecoder.Decode(msg_opus,audioChunk)
-      /*for i := 0; i < count; i++ {
-        audioChunk[i] = int16(message[i*2]) | int16(message[i*2+1]) << 8
-      }*/
       select {
       case values.ClientAudioBuffer <- audioChunk:
       default:
