@@ -42,5 +42,10 @@ func (f *ForwardEC) DecodeData(encoded []byte) ([]byte,bool,error) {
   var buf bytes.Buffer
   outSize := int((len(shards)*len(shards[0])) - (f.parityBits * len(shards[0])))
   err = f.encoder.Join(&buf,shards,outSize); if err != nil { return nil,false,err }
-  return buf.Bytes(),ok,nil
+  result := buf.Bytes()
+  lastIndex := len(result) - 1
+  for lastIndex >= 0 && result[lastIndex] == 0 {
+    lastIndex--
+  }
+  return result[:lastIndex+1],ok,nil
 }

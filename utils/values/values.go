@@ -16,14 +16,19 @@ var PublicKey *ecies.PublicKey;
 var AESKey []byte;
 
 type Client struct {
+  ClientID uuid.UUID
   Network *sctp.SCTPConn
   AESkey  []byte
 }
 
+type Audio struct {
+  OpusPCM []byte `json:"pcm"`
+  Timestamp time.Time `json:"time"`
+}
+
 type AudioChunk struct {
   BasePCM []int16
-  Overlay map[*Client][]int16
-  RefCounter int
+  Contributor uuid.UUID // client's UUID
   Timestamp time.Time
 }
 
@@ -34,8 +39,9 @@ type AudioBuffer struct {
 
 type Room struct {
   AudioBuf *AudioBuffer
-  Clients []*Client
+  Clients []uuid.UUID // client's UUID
   RoomID uuid.UUID
+  Mu sync.Mutex
 }
 
 const (
@@ -49,3 +55,4 @@ var ClientAudioBuffer = make(chan []int16,30)
 var FECEncoder,FECEncoderError = utils.NewEncoder(6,3)
 var OpusEncoder,OpusEncoderError = opus.NewEncoder(ClientRate,ClientchannelCount,opus.AppVoIP)
 var OpusDecoder,OpusDecoderError = opus.NewDecoder(ClientRate,ClientchannelCount)
+var ClientList = make([]Client,10)

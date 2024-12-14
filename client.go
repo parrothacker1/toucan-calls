@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -69,6 +70,7 @@ func main() {
     <-signals
     logrus.Info("Ctrl+C detected.Stopping the client...")
     conn.Write([]byte("EXT"))
+    time.Sleep(200*time.Millisecond)
     conn.Close()
     os.Exit(0)
   }()
@@ -103,18 +105,11 @@ func main() {
   room_id_enc,err := encrypt.EncryptAES([]byte(room_id),values.AESKey);if err != nil { logrus.Fatalf("The UUID cannot be encrypted: %v\n",err) }
   _,err = conn.Write(room_id_enc);if err != nil { logrus.Fatalf("Error in sending room ID to server %s: %v\n",conn.RemoteAddr().String(),err) }
   var wg sync.WaitGroup;
-  wg.Add(1)
-  //go ClientRead(conn)
-  //go ClientWrite(conn)
-  //go clientPlayBack()
-  go test()
+  wg.Add(3)
+  go ClientRead(conn)
+  go ClientWrite(conn)
+  go clientPlayBack()
   wg.Wait()
-}
-
-func test() {
-  for {
-    logrus.Debug("testing")
-  }
 }
 
 func clientPlayBack() {
@@ -167,7 +162,12 @@ func ClientWrite(con *sctp.SCTPConn) {
     input := make([]byte,1024)
     n,err := values.OpusEncoder.Encode(in,input)
     input = input[:n]
-    data,err := values.FECEncoder.EncodeData(input);if err != nil { logrus.Errorf("Error in adding FEC to message: %v\n",err);return }
+    tosnd := values.Audio {
+      OpusPCM: input,
+      Timestamp: time.Now(),
+    }
+    to_besnd,err := json.Marshal(tosnd);if err != nil { logrus.Errorf("Error in marshalling audio data")}
+    data,err := values.FECEncoder.EncodeData(to_besnd);if err != nil { logrus.Errorf("Error in adding FEC to message: %v\n",err);return }
     to_be_snd,err := encrypt.EncryptAES(data,values.AESKey); if err != nil { logrus.Errorf("Error in encrypting the data to be sent to %s: %v\n",con.RemoteAddr().String(),err);return }
     _,err = con.Write(to_be_snd);if err != nil { logrus.Errorf("Error in sending the data to %s: %v\n",con.RemoteAddr().String(),err);return }
   }
