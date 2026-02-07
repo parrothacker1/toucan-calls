@@ -60,7 +60,7 @@ build-server: setup
 
 build-server-docker:
 	@echo "[X] Building the server docker image"
-	@docker build -t $(DOCKER_IMAGE) -f ./Dockerfile 
+	@docker build -t $(DOCKER_IMAGE) -f ./Dockerfile . 
 	@echo "[X] Done building server docker image with tag $(DOCKER_IMAGE)"
 
 clean-image:
