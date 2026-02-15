@@ -1,100 +1,123 @@
 package events
 
-import "sync"
+import "sync/atomic"
+
+type slot[T any] struct {
+	val T
+	ver atomic.Uint32
+}
 
 type EventNode[T any] struct {
-	nodeMu sync.Mutex
-
 	capacity uint32
-	head     uint32
-	tail     uint32
+	head     atomic.Uint32
+	_        [60]byte
+	tail     atomic.Uint32
 
-	buffer   []T
+	buffer   []slot[T]
 	nextNode *EventNode[T]
 	prevNode *EventNode[T]
 }
 
 func NewEventNode[T any](size uint32) *EventNode[T] {
-	return &EventNode[T]{
-		buffer:   make([]T, size),
+	if size <= 0 {
+		panic("size of a node cannot be 0")
+	}
+	newNode := EventNode[T]{
+		buffer:   make([]slot[T], size),
 		capacity: size,
-		head:     0,
-		tail:     0,
+		head:     atomic.Uint32{},
+		tail:     atomic.Uint32{},
 
 		nextNode: nil,
 		prevNode: nil,
 	}
-
+	for i := uint32(0); i < size; i++ {
+		newNode.buffer[i].ver.Store(i)
+	}
+	return &newNode
 }
 
 func (n *EventNode[T]) Pop() (T, bool) {
-	var result, zero T
-	n.nodeMu.Lock()
-	defer n.nodeMu.Unlock()
+	head := n.head.Load()
+	slot := &n.buffer[head%n.capacity]
+	seq := slot.ver.Load()
+	diff := int32(seq) - int32(head+1)
 
-	if n.isEmpty() {
-		return zero, false
+	if diff == 0 {
+		val := slot.val
+		var zero T
+		slot.val = zero
+		slot.ver.Store(head + n.capacity)
+		n.head.Store(head + 1)
+		return val, true
 	}
-	result = n.buffer[n.head]
-	n.buffer[n.head] = zero
-	n.head = (n.head + 1) % n.capacity
-	return result, true
+
+	var zero T
+	return zero, false
 }
 
 func (n *EventNode[T]) PopAll() []T {
-	var zero T
-	n.nodeMu.Lock()
-	defer n.nodeMu.Unlock()
-
-	if n.isEmpty() {
+	head := n.head.Load()
+	tail := n.tail.Load()
+	if head == tail {
 		return nil
 	}
+	out := make([]T, 0, tail-head)
+	pos := head
 
-	result := make([]T, 0, n.capacity)
-	if n.head < n.tail {
-		result = append(result, n.buffer[n.head:n.tail]...)
-	} else {
-		result = append(result, n.buffer[n.head:]...)
-		result = append(result, n.buffer[:n.tail]...)
+	for pos < tail {
+		s := &n.buffer[pos%n.capacity]
+		seq := s.ver.Load()
+		if seq != pos+1 {
+			break
+		}
+		out = append(out, s.val)
+		var zero T
+		s.val = zero
+		s.ver.Store(pos + n.capacity)
+		pos++
 	}
 
-	for i := range n.buffer {
-		n.buffer[i] = zero
+	if pos != head {
+		n.head.Store(pos)
 	}
-	n.head = 0
-	n.tail = 0
-	n.nextNode = nil
-
-	return result
-}
-
-func (n *EventNode[T]) Push(val T) bool {
-	n.nodeMu.Lock()
-	defer n.nodeMu.Unlock()
-	if n.isFull() {
-		return false
-	}
-	n.buffer[n.tail] = val
-	n.tail = (n.tail + 1) % n.capacity
-	return true
+	return out
 }
 
 func (n *EventNode[T]) Reset() {
 	var zero T
-	n.nodeMu.Lock()
-	defer n.nodeMu.Unlock()
 	for i := range n.buffer {
-		n.buffer[i] = zero
+		n.buffer[i].val = zero
+		n.buffer[i].ver.Store(uint32(i))
 	}
-	n.head = 0
-	n.tail = 0
+	n.head.Store(0)
+	n.tail.Store(0)
 	n.nextNode = nil
+	n.prevNode = nil
 }
 
-func (n *EventNode[T]) isFull() bool {
-	return ((n.tail + 1) % n.capacity) == n.head
-}
+func (n *EventNode[T]) Push(val T) (full bool, contended bool) {
+	tail := n.tail.Load()
+	slot := &n.buffer[tail%n.capacity]
+	seq := slot.ver.Load()
+	diff := int32(seq) - int32(tail)
 
-func (n *EventNode[T]) isEmpty() bool {
-	return n.head == n.tail
+	contended = true
+	full = false
+
+	if diff < 0 {
+		full = true
+		return
+	}
+	if diff != 0 {
+		return
+	}
+
+	if !n.tail.CompareAndSwap(tail, tail+1) {
+		return
+	}
+	slot.val = val
+	slot.ver.Store(tail + 1)
+	contended = false
+	return
 }
