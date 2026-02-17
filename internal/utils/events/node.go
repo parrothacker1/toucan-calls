@@ -1,29 +1,41 @@
+/// Too lazy to write the entire thing.
+/// The entire thing is following a Queue model called Vyukov model. You
+/// can ask chatgpt to know more about it. What I am using is a MPSC ring
+/// buffer Vyukov model with atomics. And we are following sequential memory
+/// ordering with reusing the ring buffer slots and we are using ver in the
+/// slot to avoid ABA (again ask chatgpt)
+
 package events
 
 import "sync/atomic"
 
 type slot[T any] struct {
-	val T
 	ver atomic.Uint32
+	val T
+}
+
+type paddedslot[T any] struct {
+	slot[T]
+	_ [64]byte // padding to avoid false sharing
 }
 
 type EventNode[T any] struct {
 	capacity uint32
 	head     atomic.Uint32
-	_        [60]byte
+	_        [60]byte // padding to avoid false sharing
 	tail     atomic.Uint32
 
-	buffer   []slot[T]
+	buffer   []paddedslot[T]
 	nextNode *EventNode[T]
 	prevNode *EventNode[T]
 }
 
 func NewEventNode[T any](size uint32) *EventNode[T] {
-	if size <= 0 {
+	if size == 0 {
 		panic("size of a node cannot be 0")
 	}
-	newNode := EventNode[T]{
-		buffer:   make([]slot[T], size),
+	newNode := &EventNode[T]{
+		buffer:   make([]paddedslot[T], size),
 		capacity: size,
 		head:     atomic.Uint32{},
 		tail:     atomic.Uint32{},
@@ -34,7 +46,7 @@ func NewEventNode[T any](size uint32) *EventNode[T] {
 	for i := uint32(0); i < size; i++ {
 		newNode.buffer[i].ver.Store(i)
 	}
-	return &newNode
+	return newNode
 }
 
 func (n *EventNode[T]) Pop() (T, bool) {

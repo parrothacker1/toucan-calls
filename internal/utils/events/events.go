@@ -1,4 +1,21 @@
-/// Event handling queue (more write later)
+/// Event Ingestion Module
+/// The main purpose of this module is for ingestion of events of any
+/// type and store them in a queue and pop them in the order they were
+/// pushed as needed.
+/// The architecture is based on the concept of dividing the queue and
+/// using them. So every event is stored in a EventNode (read more about
+/// EventNode in events/node.go) and these EventNodes are attached using
+/// a doubly linked list for maintaining the order of the nodes. The N
+/// number of producer workers can push into the tail node simultaneoussly
+/// with minimal locks. We are focusing on single consumer setup for now (
+/// can't see the need for multiple consumers) and again here also using
+/// minimal locks and atomics for handling the pops.
+/// More detailed explanation is, so each Node follows Vyukov model (again
+/// read more about this in the node.go file) and each of them are chained
+/// using a DLL and we pop from the head node and push into the tail node.
+/// Each node pushes are lock free (inside the node) and the locks inside
+/// the queue is there to handle change of nodes and updation of other values
+/// and all
 
 // Package events
 package events
@@ -20,6 +37,7 @@ type EventOptions struct {
 	WriteThreshold int
 	RetryThreshold int
 	Retry          bool
+	Write          bool
 }
 
 type EventQueue[T any] struct {
@@ -37,6 +55,7 @@ type EventQueue[T any] struct {
 	poolNodes *arrayqueue.Queue[*EventNode[T]]
 
 	writeThreshold int
+	shouldWrite    bool
 	writer         EventWriter[T]
 	writeBuffer    []T
 	writeMu        sync.Mutex
@@ -50,28 +69,31 @@ type EventQueue[T any] struct {
 
 func NewEventQueue[T any](option *EventOptions, eventWriter EventWriter[T]) *EventQueue[T] {
 	headNode := NewEventNode[T](option.NodeSize)
-	queue := EventQueue[T]{
+	queue := &EventQueue[T]{
 		capacity:       option.Capacity,
 		nodeSize:       option.NodeSize,
 		writeThreshold: option.WriteThreshold,
 		shouldRetry:    option.Retry,
+		shouldWrite:    option.Write,
 		retryThreshold: option.RetryThreshold,
 		bufferSize:     atomic.Uint32{},
 
-		head:        headNode,
-		current:     headNode,
-		poolNodes:   arrayqueue.New[*EventNode[T]](),
-		writeBuffer: make([]T, 0, option.WriteThreshold),
-		retryBuffer: make([]T, 0, option.RetryThreshold),
-		writer:      eventWriter,
+		head:      headNode,
+		current:   headNode,
+		poolNodes: arrayqueue.New[*EventNode[T]](),
+	}
+	if queue.shouldWrite {
+		queue.writeBuffer = make([]T, 0, option.WriteThreshold)
+		queue.writer = eventWriter
+	}
+	if queue.shouldRetry {
+		queue.retryBuffer = make([]T, 0, option.RetryThreshold)
 	}
 	queue.bufferSize.Store(1)
-	return &queue
+	return queue
 }
 
 func (q *EventQueue[T]) Push(val T) bool {
-	q.currentMu.Lock()
-	defer q.currentMu.Unlock()
 	full, contented := q.current.Push(val)
 	if !full && !contented {
 		return true
@@ -82,6 +104,8 @@ func (q *EventQueue[T]) Push(val T) bool {
 	if q.bufferSize.Load() >= q.capacity {
 		return false
 	}
+	q.currentMu.Lock()
+	defer q.currentMu.Unlock()
 
 	nextNode := q.getNextNode()
 	q.current.nextNode = nextNode
@@ -113,9 +137,15 @@ func (q *EventQueue[T]) Pop() (T, bool) {
 		q.head = nextNode
 		q.bufferSize.Add(^uint32(0))
 	} else {
+		if q.shouldWrite {
+			q.pushWriteBuffer(val)
+		}
 		return val, ok
 	}
 	val, ok := q.head.Pop()
+	if q.shouldWrite {
+		q.pushWriteBuffer(val)
+	}
 	return val, ok
 }
 
@@ -166,6 +196,9 @@ func (q *EventQueue[T]) releaseNode(node *EventNode[T]) {
 }
 
 func (q *EventQueue[T]) pushWriteBuffer(val T) bool {
+	if !q.shouldWrite {
+		return false
+	}
 	q.writeMu.Lock()
 	defer q.writeMu.Unlock()
 	if len(q.writeBuffer) >= q.writeThreshold {
@@ -181,6 +214,9 @@ func (q *EventQueue[T]) drainWriteBuffer() {
 }
 
 func (q *EventQueue[T]) pushRetryBuffer(val T) bool {
+	if !q.shouldRetry {
+		return false
+	}
 	q.retryMu.Lock()
 	defer q.retryMu.Unlock()
 
@@ -207,7 +243,7 @@ func (q *EventQueue[T]) drainRetryBuffer() {
 		q.retryBuffer = q.retryBuffer[:0]
 		q.retryMu.Unlock()
 		for _, v := range batch {
-			if ok := q.Push(v); !ok {
+			if ok := q.Push(v); !ok && q.shouldWrite {
 				q.pushWriteBuffer(v)
 			}
 		}
