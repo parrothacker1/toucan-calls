@@ -138,7 +138,8 @@ func (l *Logger) Error(msg string) { l.log(Error, msg, l.fields) }
 
 func (l *Logger) Fatal(msg string) {
 	l.Error(msg)
-	panic(msg)
+	l.Events.Reset(true)
+	os.Exit(1)
 }
 
 func (l *Logger) Tracef(format string, args ...any) {
@@ -158,8 +159,7 @@ func (l *Logger) Errorf(format string, args ...any) {
 }
 func (l *Logger) Fatalf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	l.Error(msg)
-	panic(msg)
+	l.Fatal(msg)
 }
 
 func (l *Logger) Print(args ...any)   { l.Info(fmt.Sprint(args...)) }

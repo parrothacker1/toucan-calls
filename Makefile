@@ -48,13 +48,13 @@ setup:
 
 build-client: setup
 	@echo "[X] Building the client $(BUILD) binary"
-	@CGO_ENABLED=0 GOOS=$(TARGET) GOARCH=$(ARCH) \
+	@CGO_ENABLED=1 GOOS=$(TARGET) GOARCH=$(ARCH) \
 			 go build $(FLAGS) -o $(CLIENT_BIN) $(CLIENT_SRC) 
 	@echo "[X] Done building the client $(BUILD) binary"
 
 build-server: setup
 	@echo "[X] Building the server $(BUILD) binary"
-	@CGO_ENABLED=0 GOOS=$(TARGET) GOARCH=$(ARCH) \
+	@CGO_ENABLED=1 GOOS=$(TARGET) GOARCH=$(ARCH) \
 			 go build $(FLAGS) -o $(SERVER_BIN) $(SERVER_SRC) 
 	@echo "[X] Done building the server $(BUILD) binary"
 

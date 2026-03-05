@@ -4,22 +4,16 @@ import (
 	"sync"
 	"time"
 
-	ecies "github.com/ecies/go/v2"
 	"github.com/google/uuid"
-	"github.com/ishidawataru/sctp"
-	"github.com/toucan/toucan-calls/utils"
-	"gopkg.in/hraban/opus.v2"
 )
 
-var ACKMessage []byte = []byte("ACK")
-var PublicKey *ecies.PublicKey
-var AESKey []byte
+const (
+	ClientRate            = 48000
+	ClientframesPerBuffer = 480 * 6
+	ClientchannelCount    = 1
+)
 
-type Client struct {
-	ClientID uuid.UUID
-	Network  *sctp.SCTPConn
-	AESkey   []byte
-}
+var ACKMessage = []byte("ACK")
 
 type Audio struct {
 	OpusPCM   []byte    `json:"pcm"`
@@ -28,7 +22,7 @@ type Audio struct {
 
 type AudioChunk struct {
 	BasePCM     []int16
-	Contributor uuid.UUID // client's UUID
+	Contributor uuid.UUID
 	Timestamp   time.Time
 }
 
@@ -39,20 +33,7 @@ type AudioBuffer struct {
 
 type Room struct {
 	AudioBuf *AudioBuffer
-	Clients  []uuid.UUID // client's UUID
+	Clients  []uuid.UUID
 	RoomID   uuid.UUID
 	Mu       sync.Mutex
 }
-
-const (
-	ClientRate            = 48000
-	ClientframesPerBuffer = 480 * 6
-	ClientchannelCount    = 1
-)
-
-var ClientAudioBuffer = make(chan []int16, 30)
-
-var FECEncoder, FECEncoderError = utils.NewEncoder(6, 3)
-var OpusEncoder, OpusEncoderError = opus.NewEncoder(ClientRate, ClientchannelCount, opus.AppVoIP)
-var OpusDecoder, OpusDecoderError = opus.NewDecoder(ClientRate, ClientchannelCount)
-var ClientList = make([]Client, 10)
