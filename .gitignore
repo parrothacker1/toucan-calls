@@ -25,3 +25,9 @@ go.work.sum
 .env
 
 .bin
+
+# Node
+node_modules/
+
+# Database
+*.db
