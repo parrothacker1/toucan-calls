@@ -107,7 +107,7 @@ func NewLogger(opts LoggerOpts) *Logger {
 	queueOpts := &events.EventOptions{
 		Capacity:       1024,
 		NodeSize:       64,
-		WriteThreshold: 10,
+		WriteThreshold: 1,
 		Write:          true,
 	}
 

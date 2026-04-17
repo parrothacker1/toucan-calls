@@ -1,0 +1,48 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    network_mode: host
+    environment:
+      - LOKI_URL=http://127.0.0.1:3100/loki/api/v1/push
+    volumes:
+      - ./server.private.key:/root/server.private.key:ro
+      - ./users.db:/root/users.db:rw
+    depends_on:
+      - vad
+      - loki
+
+  vad:
+    build:
+      context: ./python
+      dockerfile: Dockerfile
+    ports:
+      - "5001:5001"
+    container_name: vad-server
+    environment:
+      - LOKI_URL=http://loki:3100/loki/api/v1/push
+    depends_on:
+      - loki
+
+  loki:
+    image: grafana/loki:3.4.2
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./infra/loki/loki-config.yaml:/etc/loki/local-config.yaml
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - loki

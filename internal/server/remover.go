@@ -35,7 +35,10 @@ func (s *Server) removeClient(c *client, roomUUID uuid.UUID) {
 		room.Clients[:clientIndex],
 		room.Clients[clientIndex+1:]...,
 	)
+
+	s.clientsMu.Lock()
 	delete(s.Clients, c.ClientID)
+	s.clientsMu.Unlock()
 	if len(room.Clients) == 0 {
 		s.Log.WithField("room_id", room.RoomID.String()).Debug("removing empty room")
 		s.Rooms = append(

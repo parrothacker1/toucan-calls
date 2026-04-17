@@ -24,7 +24,15 @@ func (c *Client) joinRoom() error {
 		roomID, _ = reader.ReadString('\n')
 		roomID = strings.TrimSpace(roomID)
 	}
-	roomEnc, _ := encrypt.EncryptAES([]byte(roomID), c.AESKey)
-	c.Conn.Write(roomEnc)
-	return nil
+	return c.joinRoomByID(roomID)
+}
+
+// joinRoomByID sends the room ID to the server (used by both CLI and Web UI)
+func (c *Client) joinRoomByID(roomID string) error {
+	roomEnc, err := encrypt.EncryptAES([]byte(roomID), c.AESKey)
+	if err != nil {
+		return fmt.Errorf("room encryption failed: %w", err)
+	}
+	_, err = c.Conn.Write(roomEnc)
+	return err
 }

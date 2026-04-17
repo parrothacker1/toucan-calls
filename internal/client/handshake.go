@@ -2,7 +2,10 @@ package client
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
 
 	ecies "github.com/ecies/go/v2"
 	"github.com/toucan/toucan-calls/internal/utils/values"
@@ -22,7 +25,15 @@ func (c *Client) handshake() error {
 	if err != nil {
 		return fmt.Errorf("failed to read server public key: %w", err)
 	}
-	pubKeyHex := string(pubKeyBuf[:n])
+	pubKeyHex := strings.TrimSpace(string(pubKeyBuf[:n]))
+
+	hash := sha256.Sum256(pubKeyBuf[:n])
+	serverHash := hex.EncodeToString(hash[:])
+	c.Log.Debug("verifying the public key hash")
+	if strings.TrimSpace(pinnedServerHash) != serverHash {
+		return fmt.Errorf("server identity mismatch")
+	}
+
 	pubKey, err := ecies.NewPublicKeyFromHex(pubKeyHex)
 	if err != nil {
 		return fmt.Errorf("invalid server public key: %w", err)

@@ -37,3 +37,8 @@ type Room struct {
 	RoomID   uuid.UUID
 	Mu       sync.Mutex
 }
+
+type AuthMessage struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}

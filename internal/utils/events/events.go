@@ -21,8 +21,10 @@
 package events
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/emirpasic/gods/v2/queues/arrayqueue"
 )
@@ -152,7 +154,9 @@ func (q *EventQueue[T]) Pop() (T, bool) {
 func (q *EventQueue[T]) Reset(write bool) {
 	q.headMu.Lock()
 	q.currentMu.Lock()
+	q.writeMu.Lock()
 
+	defer q.writeMu.Unlock()
 	defer q.currentMu.Unlock()
 	defer q.headMu.Unlock()
 	if write {
@@ -163,6 +167,9 @@ func (q *EventQueue[T]) Reset(write bool) {
 			q.releaseNode(n)
 			n = next
 		}
+		// Flush any events sitting in the writeBuffer
+		buf = append(buf, q.writeBuffer...)
+		q.writeBuffer = q.writeBuffer[:0]
 		q.writer.Write(buf)
 	} else {
 		for n := q.head; n != nil; {
@@ -175,6 +182,37 @@ func (q *EventQueue[T]) Reset(write bool) {
 	q.head = head
 	q.current = head
 	q.bufferSize.Store(1)
+}
+
+// Run starts a consumer goroutine that continuously drains the queue
+// and feeds events to the writer. It blocks until ctx is cancelled.
+func (q *EventQueue[T]) Run(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			// Final drain before exiting
+			for {
+				if _, ok := q.Pop(); !ok {
+					break
+				}
+			}
+			// Flush any remaining events in the write buffer
+			q.writeMu.Lock()
+			if q.shouldWrite && len(q.writeBuffer) > 0 {
+				q.drainWriteBuffer()
+			}
+			q.writeMu.Unlock()
+			return
+		case <-ticker.C:
+			for {
+				if _, ok := q.Pop(); !ok {
+					break
+				}
+			}
+		}
+	}
 }
 
 func (q *EventQueue[T]) getNextNode() *EventNode[T] {
@@ -210,7 +248,7 @@ func (q *EventQueue[T]) pushWriteBuffer(val T) bool {
 
 func (q *EventQueue[T]) drainWriteBuffer() {
 	q.writer.Write(q.writeBuffer)
-	q.writeBuffer = q.writeBuffer[0:]
+	q.writeBuffer = q.writeBuffer[:0]
 }
 
 func (q *EventQueue[T]) pushRetryBuffer(val T) bool {
